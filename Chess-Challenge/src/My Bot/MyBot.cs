@@ -29,9 +29,9 @@ public class MyBot : IChessBot
 
 	//State cache
 	Board _board;
-	int[] moveValues = new int[256];
+	//int[] moveValues = new int[256];
 	bool isWhiteTeam;
-	Random fallbackRand = new Random(150);
+	Random fallbackRand = new(150);
 
 	public Move Think(Board board, Timer timer)
 	{
@@ -43,28 +43,30 @@ public class MyBot : IChessBot
 			//Panic time!
 			//We can NOT run out of time, so use a faster method of picking
 			//based on random chance - it's at least something
+			Console.WriteLine("SOMETHING BAD");
 			return moves[fallbackRand.Next(moves.Length)];
 		}
 
 		isWhiteTeam = _board.IsWhiteToMove;
 
-		//Acquire all the move values through minimax
-		for (int i = 0; i < moves.Length; i++)
-		{
-			moveValues[i] = MiniMaxAbsolute(moves[i], 2, true);
-		}
-		//Find the best value and select it!
-		//Moves that tie with highest are ignored
+		//Acquire all the move values and pick the best one
 		int highestMoveIndex = 0;
-		int highestValue = -40000;
+		int highestValue = int.MinValue;
+
 		for (int i = 0; i < moves.Length; i++)
 		{
-			if (moveValues[i] > highestValue)
+			//First, run the results of minimax
+			int thisMoveValue = MiniMaxAbsolute(moves[i], 3, true, isWhiteTeam ? 1 : -1);
+			//Add heuristic modifiers for this single move
+
+
+			if(thisMoveValue > highestValue)
 			{
-				highestValue = moveValues[i];
+				highestValue = thisMoveValue;
 				highestMoveIndex = i;
 			}
 		}
+
 		Console.WriteLine("Highest value: " + highestValue);
 		return moves[highestMoveIndex];
 	}
@@ -78,7 +80,7 @@ public class MyBot : IChessBot
 	/// <param name="depth">How many times to continue the search</param>
 	/// <param name="thisTeamTurn">Whether we're making the move or not</param>
 	/// <returns></returns>
-	int MiniMaxAbsolute(Move currentMove, int depth, bool thisTeamTurn)
+	int MiniMaxAbsolute(Move currentMove, int depth, bool thisTeamTurn, int teamMul)
 	{
 
 		if (depth == 0)
@@ -91,20 +93,16 @@ public class MyBot : IChessBot
 			foreach (PieceType thisType in Enum.GetValues(typeof(PieceType)))
 			{
 				//For each type, get the count and multiply by the weight of that type
-				if(thisType == PieceType.None)
+				if (thisType == PieceType.None)
 				{
 					continue;
 				}
-
-				//TODO: The other player should be maximizing their moves as well
-
-				finalValue += _board.GetPieceList(thisType, isWhiteTeam).Count 
-					* selfPieceWeights[(int)thisType];
-				finalValue -= _board.GetPieceList(thisType, !isWhiteTeam).Count
-					* (selfPieceWeights[(int)thisType] - enemyPieceWeightModifier);
+				finalValue += (_board.GetPieceList(thisType, true).Count * selfPieceWeights[(int)thisType]);
+				finalValue -= (_board.GetPieceList(thisType, false).Count * selfPieceWeights[(int)thisType]);
+				//finalValue -= _board.GetPieceList(thisType, !whiteToMove).Count
+				//	* (selfPieceWeights[(int)thisType] - enemyPieceWeightModifier);
 			}
-
-			return finalValue;
+			return finalValue * teamMul;
 
 			/*
 			ulong bitboardToUse = _board.BlackPiecesBitboard;
@@ -126,21 +124,30 @@ public class MyBot : IChessBot
 			*/
 		}
 
+		/*
+		if(_board.IsInCheckmate() || _board.IsDraw())
+		{
+			return 40000 * teamMul;
+		}
+		*/
+
 		//Apply the move
 		_board.MakeMove(currentMove);
 
 		//Get the new moves for the next turn
 		var nextMoves = GetLegalMoves();
-		int highestValue = -40000;
+		int bestValue = int.MinValue;
+
 		foreach (Move nextMove in nextMoves)
 		{
-			int thisVal = MiniMaxAbsolute(nextMove, depth - 1, !thisTeamTurn);
-			highestValue = Math.Max(thisVal, highestValue);
+			int thisVal = -MiniMaxAbsolute(nextMove, depth - 1, !thisTeamTurn, teamMul * -1);
+			//High value is for us, low value is for opponent
+			bestValue = Math.Max(thisVal, bestValue);
 		}
 
 		//Make sure to undo the move before leaving this branch
 		_board.UndoMove(currentMove);
-		return highestValue;
+		return bestValue;
 	}
 
 
