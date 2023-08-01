@@ -9,11 +9,11 @@ public class MyBot : IChessBot
 	{
 		0, //Unused - None
 		100, //Pawn
-		130, //Knight
-		150, //Bishop
-		180, //Rook
-		210, //Queen
-		400, //King
+		200, //Knight
+		300, //Bishop
+		350, //Rook
+		500, //Queen
+		900, //King
 	};
 	int enemyPieceWeightModifier = 30;
 	int[] enemyPieceWeights =
@@ -56,7 +56,7 @@ public class MyBot : IChessBot
 		for (int i = 0; i < moves.Length; i++)
 		{
 			//First, run the results of minimax
-			int thisMoveValue = MiniMaxAbsolute(moves[i], 3, true, isWhiteTeam ? 1 : -1);
+			int thisMoveValue = MiniMaxAbsolute(moves[i], 2, true, isWhiteTeam ? 1 : -1);
 			//Add heuristic modifiers for this single move
 
 
@@ -83,6 +83,10 @@ public class MyBot : IChessBot
 	int MiniMaxAbsolute(Move currentMove, int depth, bool thisTeamTurn, int teamMul)
 	{
 
+		//Apply the move first
+		//To ensure that its accounted for in evaluation
+		_board.MakeMove(currentMove);
+
 		if (depth == 0)
 		{
 			//Count up number of pieces we have left
@@ -97,12 +101,17 @@ public class MyBot : IChessBot
 				{
 					continue;
 				}
-				finalValue += (_board.GetPieceList(thisType, true).Count * selfPieceWeights[(int)thisType]);
-				finalValue -= (_board.GetPieceList(thisType, false).Count * selfPieceWeights[(int)thisType]);
+				finalValue += (_board.GetPieceList(thisType, isWhiteTeam).Count * 
+					selfPieceWeights[(int)thisType]);
+				finalValue -= (_board.GetPieceList(thisType, !isWhiteTeam).Count * 
+					(selfPieceWeights[(int)thisType]));
 				//finalValue -= _board.GetPieceList(thisType, !whiteToMove).Count
 				//	* (selfPieceWeights[(int)thisType] - enemyPieceWeightModifier);
 			}
-			return finalValue * teamMul;
+
+			//Make sure to return the board state when leaving
+			_board.UndoMove(currentMove);
+			return finalValue;
 
 			/*
 			ulong bitboardToUse = _board.BlackPiecesBitboard;
@@ -131,21 +140,36 @@ public class MyBot : IChessBot
 		}
 		*/
 
-		//Apply the move
-		_board.MakeMove(currentMove);
 
 		//Get the new moves for the next turn
 		var nextMoves = GetLegalMoves();
-		int bestValue = int.MinValue;
+		int bestValue = int.MaxValue;
+		if(thisTeamTurn)
+		{
+			bestValue = int.MinValue;
+		}
 
 		foreach (Move nextMove in nextMoves)
 		{
+			/*
 			int thisVal = -MiniMaxAbsolute(nextMove, depth - 1, !thisTeamTurn, teamMul * -1);
 			//High value is for us, low value is for opponent
 			bestValue = Math.Max(thisVal, bestValue);
+			*/
+
+			int thisVal = MiniMaxAbsolute(nextMove, depth - 1, !thisTeamTurn, teamMul * -1);
+
+			if(thisTeamTurn)
+			{
+				bestValue = Math.Max(thisVal, bestValue);
+			}
+			else
+			{
+				bestValue = Math.Min(thisVal, bestValue);
+			}
 		}
 
-		//Make sure to undo the move before leaving this branch
+		//Undo the move since we didn't return from eval
 		_board.UndoMove(currentMove);
 		return bestValue;
 	}
