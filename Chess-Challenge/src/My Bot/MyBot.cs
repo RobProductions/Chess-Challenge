@@ -55,10 +55,15 @@ public class MyBot : IChessBot
 
 		for (int i = 0; i < moves.Length; i++)
 		{
+			var thisMove = moves[i];
+			//Apply the move so we can do heuristics outside of minimax later
+			_board.MakeMove(thisMove);
 			//First, run the results of minimax
-			int thisMoveValue = MiniMaxAbsolute(moves[i], 3, true, isWhiteTeam ? 1 : -1);
+			int thisMoveValue = MiniMaxAbsolute(3, true, isWhiteTeam ? 1 : -1);
 			//Add heuristic modifiers for this single move
 
+			//Now undo the move to return the board state
+			_board.UndoMove(thisMove);
 
 			if(thisMoveValue > highestValue)
 			{
@@ -76,16 +81,28 @@ public class MyBot : IChessBot
 	/// <summary>
 	/// Run Minimax on the current move
 	/// </summary>
-	/// <param name="currentMove">Move to start with</param>
 	/// <param name="depth">How many times to continue the search</param>
 	/// <param name="thisTeamTurn">Whether we're making the move or not</param>
 	/// <returns></returns>
-	int MiniMaxAbsolute(Move currentMove, int depth, bool thisTeamTurn, int teamMul)
+	int MiniMaxAbsolute(int depth, bool thisTeamTurn, int teamMul)
 	{
 
-		//Apply the move first
-		//To ensure that its accounted for in evaluation
-		_board.MakeMove(currentMove);
+		//Since there might not be legal moves by this point,
+		//We need to escape if the game has ended
+		if (_board.IsInCheckmate() || _board.IsDraw())
+		{
+			//Make sure to return board state
+			//_board.UndoMove(currentMove);
+
+			if (thisTeamTurn)
+			{
+				return 40000;
+			}
+			else
+			{
+				return -40000;
+			}
+		}
 
 		if (depth == 0)
 		{
@@ -109,9 +126,6 @@ public class MyBot : IChessBot
 				//finalValue -= _board.GetPieceList(thisType, !whiteToMove).Count
 				//	* (selfPieceWeights[(int)thisType] - enemyPieceWeightModifier);
 			}
-			
-			//Make sure to return the board state when leaving
-			_board.UndoMove(currentMove);
 			return finalValue;
 
 			/*
@@ -134,22 +148,7 @@ public class MyBot : IChessBot
 			*/
 		}
 
-		//Since there might not be legal moves by this point,
-		//We need to escape if the game has ended
-		if(_board.IsInCheckmate() || _board.IsDraw())
-		{
-			//Make sure to return board state
-			_board.UndoMove(currentMove);
-
-			if(thisTeamTurn)
-			{
-				return -40000;
-			}
-			else
-			{
-				return 40000;
-			}
-		}
+		
 
 		//Get the new moves for the next turn
 		var nextMoves = GetLegalMoves();
@@ -164,6 +163,8 @@ public class MyBot : IChessBot
 		{
 			Console.WriteLine("UH OH");
 		}
+		//TODO: Make this negamax instead
+
 		//Console.WriteLine(nextMoves.Length);
 		foreach (Move nextMove in nextMoves)
 		{
@@ -173,7 +174,15 @@ public class MyBot : IChessBot
 			bestValue = Math.Max(thisVal, bestValue);
 			*/
 
-			int thisVal = MiniMaxAbsolute(nextMove, depth - 1, !thisTeamTurn, teamMul * -1);
+			//Make the next move for next iteration/eval
+			_board.MakeMove(nextMove);
+
+			//Higher value = we're winning
+			//Lower value = enemy is winning
+			int thisVal = MiniMaxAbsolute(depth - 1, !thisTeamTurn, teamMul * -1);
+
+			//Return the board state
+			_board.UndoMove(nextMove);
 
 			if(thisTeamTurn)
 			{
@@ -187,8 +196,6 @@ public class MyBot : IChessBot
 			}
 		}
 
-		//Undo the move since we didn't return from eval
-		_board.UndoMove(currentMove);
 		return bestValue;
 	}
 
