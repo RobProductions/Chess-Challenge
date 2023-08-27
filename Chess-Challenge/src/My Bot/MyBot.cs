@@ -56,7 +56,7 @@ public class MyBot : IChessBot
 		for (int i = 0; i < moves.Length; i++)
 		{
 			//First, run the results of minimax
-			int thisMoveValue = MiniMaxAbsolute(moves[i], 2, true, isWhiteTeam ? 1 : -1);
+			int thisMoveValue = MiniMaxAbsolute(moves[i], 3, true, isWhiteTeam ? 1 : -1);
 			//Add heuristic modifiers for this single move
 
 
@@ -101,6 +101,7 @@ public class MyBot : IChessBot
 				{
 					continue;
 				}
+
 				finalValue += (_board.GetPieceList(thisType, isWhiteTeam).Count * 
 					selfPieceWeights[(int)thisType]);
 				finalValue -= (_board.GetPieceList(thisType, !isWhiteTeam).Count * 
@@ -108,7 +109,7 @@ public class MyBot : IChessBot
 				//finalValue -= _board.GetPieceList(thisType, !whiteToMove).Count
 				//	* (selfPieceWeights[(int)thisType] - enemyPieceWeightModifier);
 			}
-
+			
 			//Make sure to return the board state when leaving
 			_board.UndoMove(currentMove);
 			return finalValue;
@@ -133,22 +134,37 @@ public class MyBot : IChessBot
 			*/
 		}
 
-		/*
+		//Since there might not be legal moves by this point,
+		//We need to escape if the game has ended
 		if(_board.IsInCheckmate() || _board.IsDraw())
 		{
-			return 40000 * teamMul;
-		}
-		*/
+			//Make sure to return board state
+			_board.UndoMove(currentMove);
 
+			if(thisTeamTurn)
+			{
+				return -40000;
+			}
+			else
+			{
+				return 40000;
+			}
+		}
 
 		//Get the new moves for the next turn
 		var nextMoves = GetLegalMoves();
-		int bestValue = int.MaxValue;
+		//Since we're now looking at the NEXT moves and not the one that was just made,
+		//thisTeamTurn actually means we should minimize, not maximize
+		int bestValue = int.MinValue;
 		if(thisTeamTurn)
 		{
-			bestValue = int.MinValue;
+			bestValue = int.MaxValue;
 		}
-
+		if(nextMoves.Length == 0)
+		{
+			Console.WriteLine("UH OH");
+		}
+		//Console.WriteLine(nextMoves.Length);
 		foreach (Move nextMove in nextMoves)
 		{
 			/*
@@ -161,11 +177,13 @@ public class MyBot : IChessBot
 
 			if(thisTeamTurn)
 			{
-				bestValue = Math.Max(thisVal, bestValue);
+				//Console.WriteLine("T: " + thisVal + " | B: " + bestValue);
+				bestValue = Math.Min(thisVal, bestValue);
 			}
 			else
 			{
-				bestValue = Math.Min(thisVal, bestValue);
+				//Console.WriteLine("ET: " + thisVal + " | B: " + bestValue);
+				bestValue = Math.Max(thisVal, bestValue);
 			}
 		}
 
