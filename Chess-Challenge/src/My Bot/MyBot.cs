@@ -15,8 +15,9 @@ public class MyBot : IChessBot
 		500, //Queen
 		900, //King
 	};
-	int repeatMoveHeuristic = -10;
-	int capKingHeuristic = 50;
+	const int repeatMoveHeuristic = -50;
+	const int capKingHeuristic = 50;
+	const int centerSquareWeight = 10;
 
 	//Decision data
 	Move[] repeatMoveArray = new Move[8];
@@ -42,6 +43,17 @@ public class MyBot : IChessBot
 		}
 
 		isWhiteTeam = _board.IsWhiteToMove;
+		int enemyPiecesCount = 0;
+
+		foreach (PieceType thisType in Enum.GetValues(typeof(PieceType)))
+		{
+			if (thisType == PieceType.None)
+			{
+				continue;
+			}
+
+			enemyPiecesCount += _board.GetPieceList(thisType, !isWhiteTeam).Count;
+		}
 
 		//Acquire all the move values and pick the best one
 		int highestMoveIndex = 0;
@@ -72,6 +84,29 @@ public class MyBot : IChessBot
 					break;
 				}
 				
+			}
+			//Check if this new move now threatens
+			//the opponent's king, if so this is good
+			//for trapping it in the endgame
+			if(_board.IsInCheck())
+			{
+				thisMoveValue += capKingHeuristic;
+			}
+			var targetSquare = thisMove.TargetSquare;
+			//For pawns and knights, center positions are better
+			if(thisMove.MovePieceType == PieceType.Pawn || thisMove.MovePieceType == PieceType.Knight)
+			{
+				if (targetSquare.Rank >= 2 && targetSquare.Rank <= 5
+				&& targetSquare.File >= 2 && targetSquare.File <= 5)
+				{
+					thisMoveValue += centerSquareWeight;
+
+					if (targetSquare.Rank >= 3 && targetSquare.Rank <= 4
+					&& targetSquare.File >= 3 && targetSquare.File <= 4)
+					{
+						thisMoveValue += centerSquareWeight;
+					}
+				}
 			}
 
 			//Now undo the move to return the board state
