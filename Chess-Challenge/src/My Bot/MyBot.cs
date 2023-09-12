@@ -15,21 +15,15 @@ public class MyBot : IChessBot
 		500, //Queen
 		900, //King
 	};
-	int enemyPieceWeightModifier = 30;
-	int[] enemyPieceWeights =
-	{
-		0, //Unused - None
-		100, //Pawn
-		130, //Knight
-		150, //Bishop
-		180, //Rook
-		210, //Queen
-		400, //King
-	};
+	int repeatMoveHeuristic = -10;
+	int capKingHeuristic = 50;
+
+	//Decision data
+	Move[] repeatMoveArray = new Move[8];
+	int repeatMoveIndex = 0;
 
 	//State cache
 	Board _board;
-	//int[] moveValues = new int[256];
 	bool isWhiteTeam;
 	Random fallbackRand = new(150);
 
@@ -38,12 +32,12 @@ public class MyBot : IChessBot
 		_board = board;
 		Move[] moves = GetLegalMoves();
 
-		if(timer.MillisecondsRemaining < 50)
+		if(timer.MillisecondsRemaining < 500)
 		{
 			//Panic time!
 			//We can NOT run out of time, so use a faster method of picking
 			//based on random chance - it's at least something
-			Console.WriteLine("SOMETHING BAD");
+			Console.WriteLine("PANIC TIME");
 			return moves[fallbackRand.Next(moves.Length)];
 		}
 
@@ -60,7 +54,25 @@ public class MyBot : IChessBot
 			_board.MakeMove(thisMove);
 			//First, run the results of minimax
 			int thisMoveValue = MiniMaxAbsolute(3, true, isWhiteTeam ? 1 : -1);
+
 			//Add heuristic modifiers for this single move
+
+			//Check if this move was made previously and decrease score
+			//This is to ensure that the game doesn't draw as easily
+			foreach(Move repeatMove in repeatMoveArray)
+			{
+				if(repeatMove.IsNull)
+				{
+					continue;
+				}
+				
+				if(repeatMove.Equals(thisMove))
+				{
+					thisMoveValue += repeatMoveHeuristic;
+					break;
+				}
+				
+			}
 
 			//Now undo the move to return the board state
 			_board.UndoMove(thisMove);
@@ -70,10 +82,25 @@ public class MyBot : IChessBot
 				highestValue = thisMoveValue;
 				highestMoveIndex = i;
 			}
+			if(timer.MillisecondsRemaining < 500)
+			{
+				//Panic time!
+				Console.WriteLine("PANIC TIME 2: THE PANICKING");
+				break;
+			}
 		}
 
 		Console.WriteLine("Highest value: " + highestValue);
-		return moves[highestMoveIndex];
+		var highestMove = moves[highestMoveIndex];
+
+		//Add this chosen move to the repeat move array
+		repeatMoveArray[repeatMoveIndex] = highestMove;
+		repeatMoveIndex++;
+		if (repeatMoveIndex >= repeatMoveArray.Length)
+		{
+			repeatMoveIndex = 0;
+		}
+		return highestMove;
 	}
 
 	//MAIN LOGIC
@@ -84,24 +111,18 @@ public class MyBot : IChessBot
 	/// <param name="depth">How many times to continue the search</param>
 	/// <param name="thisTeamTurn">Whether we're making the move or not</param>
 	/// <returns></returns>
-	int MiniMaxAbsolute(int depth, bool thisTeamTurn, int teamMul)
+	int MiniMaxAbsolute(int depth, bool thisTeamTurn, int teamMul, int alpha = int.MaxValue, int beta = -int.MaxValue)
 	{
 
 		//Since there might not be legal moves by this point,
 		//We need to escape if the game has ended
 		if (_board.IsInCheckmate() || _board.IsDraw())
 		{
-			//Make sure to return board state
-			//_board.UndoMove(currentMove);
-
-			if (thisTeamTurn)
-			{
-				return 40000;
-			}
-			else
-			{
-				return -40000;
-			}
+			//If whiteToMove, we actually receive -1 in teamMul because
+			//White's move was made already
+			//So return -40000 * teamMul which is good for black
+			//because it becomes 40000 on white's turn
+			return -40000 * teamMul;
 		}
 
 		if (depth == 0)
@@ -119,14 +140,14 @@ public class MyBot : IChessBot
 					continue;
 				}
 
-				finalValue += (_board.GetPieceList(thisType, isWhiteTeam).Count * 
+				finalValue += (_board.GetPieceList(thisType, true).Count * 
 					selfPieceWeights[(int)thisType]);
-				finalValue -= (_board.GetPieceList(thisType, !isWhiteTeam).Count * 
+				finalValue -= (_board.GetPieceList(thisType, false).Count * 
 					(selfPieceWeights[(int)thisType]));
 				//finalValue -= _board.GetPieceList(thisType, !whiteToMove).Count
 				//	* (selfPieceWeights[(int)thisType] - enemyPieceWeightModifier);
 			}
-			return finalValue;
+			return finalValue * teamMul;
 
 			/*
 			ulong bitboardToUse = _board.BlackPiecesBitboard;
@@ -154,16 +175,11 @@ public class MyBot : IChessBot
 		var nextMoves = GetLegalMoves();
 		//Since we're now looking at the NEXT moves and not the one that was just made,
 		//thisTeamTurn actually means we should minimize, not maximize
-		int bestValue = int.MinValue;
-		if(thisTeamTurn)
-		{
-			bestValue = int.MaxValue;
-		}
+		int bestValue = int.MaxValue;
 		if(nextMoves.Length == 0)
 		{
 			Console.WriteLine("UH OH");
 		}
-		//TODO: Make this negamax instead
 
 		//Console.WriteLine(nextMoves.Length);
 		foreach (Move nextMove in nextMoves)
@@ -179,11 +195,19 @@ public class MyBot : IChessBot
 
 			//Higher value = we're winning
 			//Lower value = enemy is winning
-			int thisVal = MiniMaxAbsolute(depth - 1, !thisTeamTurn, teamMul * -1);
+			int thisVal = -MiniMaxAbsolute(depth - 1, !thisTeamTurn, -teamMul, -beta, -alpha);
 
 			//Return the board state
 			_board.UndoMove(nextMove);
 
+			bestValue = Math.Min(thisVal, bestValue);
+			alpha = Math.Min(thisVal, alpha);
+			if(alpha <= beta)
+			{
+				//Console.WriteLine("asdasd" + alpha);
+				break;
+			}
+			/*
 			if(thisTeamTurn)
 			{
 				//Console.WriteLine("T: " + thisVal + " | B: " + bestValue);
@@ -194,6 +218,7 @@ public class MyBot : IChessBot
 				//Console.WriteLine("ET: " + thisVal + " | B: " + bestValue);
 				bestValue = Math.Max(thisVal, bestValue);
 			}
+			*/
 		}
 
 		return bestValue;
