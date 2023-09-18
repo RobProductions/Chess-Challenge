@@ -16,7 +16,11 @@ public class MyBot : IChessBot
 		900, //King
 	};
 	const int repeatMoveHeuristic = -50;
-	const int capKingHeuristic = 50;
+	const int capKingHeuristic = 30;
+	const int checkmateHeuristic = 500;
+	const int moveSquareThreatenedHeuristic = -30;
+	const int pushKingHeuristic = 40;
+	const int kingAdvanceHeuristic = 50;
 	const int centerSquareWeight = 10;
 
 	//Decision data
@@ -54,6 +58,16 @@ public class MyBot : IChessBot
 
 			enemyPiecesCount += _board.GetPieceList(thisType, !isWhiteTeam).Count;
 		}
+		//Determine how close we are to the endgame
+		int finalPushKingHeuristic = 0;
+		int finalKingAdvanceHeuristic = 0;
+
+		if (enemyPiecesCount <= 8)
+		{
+			double endgameLerpAmt = InverseLerp(8.0, 1.0, (double)enemyPiecesCount);
+			finalPushKingHeuristic = (int)Math.Round(BotLerp(0.0, (double)pushKingHeuristic, endgameLerpAmt));
+			finalKingAdvanceHeuristic = (int)Math.Round(BotLerp(0.0, (double)kingAdvanceHeuristic, endgameLerpAmt));
+		}
 
 		//Acquire all the move values and pick the best one
 		int highestMoveIndex = 0;
@@ -67,7 +81,7 @@ public class MyBot : IChessBot
 			//First, run the results of minimax
 			int thisMoveValue = MiniMaxAbsolute(3, true, isWhiteTeam ? 1 : -1);
 
-			//Add heuristic modifiers for this single move
+			//Add first stage heuristic modifiers for this single move
 
 			//Check if this move was made previously and decrease score
 			//This is to ensure that the game doesn't draw as easily
@@ -87,30 +101,71 @@ public class MyBot : IChessBot
 			}
 			//Check if this new move now threatens
 			//the opponent's king, if so this is good
-			//for trapping it in the endgame
-			if(_board.IsInCheck())
+			//for trapping it but not if we're too deep in the endgame
+			if(_board.IsInCheck() && enemyPiecesCount > 8)
 			{
 				thisMoveValue += capKingHeuristic;
 			}
+			//Check if it like super threatens the opponent king,
+			//and if so that's a big reason to make this move
+			if(_board.IsInCheckmate())
+			{
+				thisMoveValue += checkmateHeuristic;
+			}
 			var targetSquare = thisMove.TargetSquare;
 			//For pawns and knights, center positions are better
-			if(thisMove.MovePieceType == PieceType.Pawn || thisMove.MovePieceType == PieceType.Knight)
+			if(enemyPiecesCount > 8)
 			{
-				if (targetSquare.Rank >= 2 && targetSquare.Rank <= 5
-				&& targetSquare.File >= 2 && targetSquare.File <= 5)
+				if (thisMove.MovePieceType == PieceType.Pawn || thisMove.MovePieceType == PieceType.Knight)
 				{
-					thisMoveValue += centerSquareWeight;
-
-					if (targetSquare.Rank >= 3 && targetSquare.Rank <= 4
-					&& targetSquare.File >= 3 && targetSquare.File <= 4)
+					if (targetSquare.Rank >= 2 && targetSquare.Rank <= 5
+					&& targetSquare.File >= 2 && targetSquare.File <= 5)
 					{
 						thisMoveValue += centerSquareWeight;
+
+						if (targetSquare.Rank >= 3 && targetSquare.Rank <= 4
+						&& targetSquare.File >= 3 && targetSquare.File <= 4)
+						{
+							thisMoveValue += centerSquareWeight;
+						}
 					}
 				}
 			}
+			//Add weight as we approach endgame
+			//based on how far the opponent king is pushed to the corners
+			//This helps to acquire checkmate
+			var enemyKingSquare = _board.GetKingSquare(!isWhiteTeam);
+			int opponentKingDist = Math.Max(3 - enemyKingSquare.File, enemyKingSquare.File - 4) + Math.Max(3 - enemyKingSquare.Rank, enemyKingSquare.Rank - 4);
+			int kingPushBonus = (int)Math.Round(BotLerp(0.0, finalPushKingHeuristic, opponentKingDist / 6.0));
+			thisMoveValue += kingPushBonus;
+			if(kingPushBonus > 0)
+			{
+
+				Console.WriteLine("King push: " + kingPushBonus);
+			}
+			//Add weight to move our king towards opponent king
+			var ourKingSquare = _board.GetKingSquare(isWhiteTeam);
+			int distBetweenKings = Math.Abs(ourKingSquare.File - enemyKingSquare.File) + Math.Abs(ourKingSquare.Rank - enemyKingSquare.Rank);
+			int kingAdvanceBonus = (int)Math.Round(BotLerp(0.0, finalKingAdvanceHeuristic, (14.0 - (double)distBetweenKings) / 14.0));
+			thisMoveValue += kingAdvanceBonus;
+
+			//Add weight based on distance to move further pieces closer to the enemy king
+			//TODO: This
 
 			//Now undo the move to return the board state
 			_board.UndoMove(thisMove);
+
+			//Add second stage heuristics
+			//That apply "before" we make this move
+
+			//Check if this move will directly threaten our piece
+			//This is to ensure fewer "even trades" that don't get us anywhere
+			if(_board.SquareIsAttackedByOpponent(thisMove.TargetSquare))
+			{
+				thisMoveValue += moveSquareThreatenedHeuristic;
+			}
+
+			//Heuristics complete
 
 			if(thisMoveValue > highestValue)
 			{
@@ -219,12 +274,6 @@ public class MyBot : IChessBot
 		//Console.WriteLine(nextMoves.Length);
 		foreach (Move nextMove in nextMoves)
 		{
-			/*
-			int thisVal = -MiniMaxAbsolute(nextMove, depth - 1, !thisTeamTurn, teamMul * -1);
-			//High value is for us, low value is for opponent
-			bestValue = Math.Max(thisVal, bestValue);
-			*/
-
 			//Make the next move for next iteration/eval
 			_board.MakeMove(nextMove);
 
@@ -269,5 +318,25 @@ public class MyBot : IChessBot
 	Move[] GetLegalMoves()
 	{
 		return _board.GetLegalMoves();
+	}
+
+	/// <summary>
+	/// Linear interpolation between two floats
+	/// </summary>
+	double BotLerp(double v1, double v2, double by)
+	{
+		return v1 * (1 - by) + v2 * by;
+	}
+
+	/// <summary>
+	/// Reverse interpolation
+	/// </summary>
+	/// <param name="v1"></param>
+	/// <param name="v2"></param>
+	/// <param name="amt"></param>
+	/// <returns></returns>
+	double InverseLerp(double v1, double v2, double amt)
+	{
+		return (amt - v1) / (v2 - v1);
 	}
 }
