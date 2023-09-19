@@ -1,6 +1,5 @@
 ﻿using ChessChallenge.API;
 using System;
-using System.Collections.Generic;
 
 public class MyBot : IChessBot
 {
@@ -20,7 +19,8 @@ public class MyBot : IChessBot
 	const int checkmateHeuristic = 500;
 	const int moveSquareThreatenedHeuristic = -30;
 	const int pushKingHeuristic = 40;
-	const int kingAdvanceHeuristic = 50;
+	const int kingAdvanceHeuristic = 40;
+	const int promotionHeuristic = 60;
 	const int centerSquareWeight = 10;
 
 	//Decision data
@@ -37,7 +37,7 @@ public class MyBot : IChessBot
 		_board = board;
 		Move[] moves = GetLegalMoves();
 
-		if(timer.MillisecondsRemaining < 500)
+		if (timer.MillisecondsRemaining < 500)
 		{
 			//Panic time!
 			//We can NOT run out of time, so use a faster method of picking
@@ -48,6 +48,7 @@ public class MyBot : IChessBot
 
 		isWhiteTeam = _board.IsWhiteToMove;
 		int enemyPiecesCount = 0;
+		int myPieceCount = 0;
 
 		foreach (PieceType thisType in Enum.GetValues(typeof(PieceType)))
 		{
@@ -57,6 +58,7 @@ public class MyBot : IChessBot
 			}
 
 			enemyPiecesCount += _board.GetPieceList(thisType, !isWhiteTeam).Count;
+			myPieceCount += _board.GetPieceList(thisType, isWhiteTeam).Count;
 		}
 		//Determine how close we are to the endgame
 		int finalPushKingHeuristic = 0;
@@ -69,6 +71,12 @@ public class MyBot : IChessBot
 			finalKingAdvanceHeuristic = (int)Math.Round(BotLerp(0.0, (double)kingAdvanceHeuristic, endgameLerpAmt));
 		}
 
+		int searchDepth = 3;
+		if (enemyPiecesCount + myPieceCount <= 8)
+		{
+			searchDepth = 4;
+		}
+
 		//Acquire all the move values and pick the best one
 		int highestMoveIndex = 0;
 		int highestValue = int.MinValue;
@@ -79,7 +87,7 @@ public class MyBot : IChessBot
 			//Apply the move so we can do heuristics outside of minimax later
 			_board.MakeMove(thisMove);
 			//First, run the results of minimax
-			int thisMoveValue = MiniMaxAbsolute(3, true, isWhiteTeam ? 1 : -1);
+			int thisMoveValue = MiniMaxAbsolute(searchDepth, true, isWhiteTeam ? 1 : -1);
 
 			//Add first stage heuristic modifiers for this single move
 
@@ -138,19 +146,11 @@ public class MyBot : IChessBot
 			int opponentKingDist = Math.Max(3 - enemyKingSquare.File, enemyKingSquare.File - 4) + Math.Max(3 - enemyKingSquare.Rank, enemyKingSquare.Rank - 4);
 			int kingPushBonus = (int)Math.Round(BotLerp(0.0, finalPushKingHeuristic, opponentKingDist / 6.0));
 			thisMoveValue += kingPushBonus;
-			if(kingPushBonus > 0)
-			{
-
-				Console.WriteLine("King push: " + kingPushBonus);
-			}
 			//Add weight to move our king towards opponent king
 			var ourKingSquare = _board.GetKingSquare(isWhiteTeam);
 			int distBetweenKings = Math.Abs(ourKingSquare.File - enemyKingSquare.File) + Math.Abs(ourKingSquare.Rank - enemyKingSquare.Rank);
 			int kingAdvanceBonus = (int)Math.Round(BotLerp(0.0, finalKingAdvanceHeuristic, (14.0 - (double)distBetweenKings) / 14.0));
 			thisMoveValue += kingAdvanceBonus;
-
-			//Add weight based on distance to move further pieces closer to the enemy king
-			//TODO: This
 
 			//Now undo the move to return the board state
 			_board.UndoMove(thisMove);
@@ -163,6 +163,11 @@ public class MyBot : IChessBot
 			if(_board.SquareIsAttackedByOpponent(thisMove.TargetSquare))
 			{
 				thisMoveValue += moveSquareThreatenedHeuristic;
+			}
+			//Add bonus for promotion
+			if(thisMove.IsPromotion)
+			{
+				thisMoveValue += promotionHeuristic;
 			}
 
 			//Heuristics complete
@@ -206,13 +211,21 @@ public class MyBot : IChessBot
 
 		//Since there might not be legal moves by this point,
 		//We need to escape if the game has ended
-		if (_board.IsInCheckmate() || _board.IsDraw())
+		if(_board.IsDraw())
 		{
-			//If whiteToMove, we actually receive -1 in teamMul because
-			//White's move was made already
-			//So return -40000 * teamMul which is good for black
-			//because it becomes 40000 on white's turn
-			return -40000 * teamMul;
+			//This is bad for everyone
+			if(isWhiteTeam)
+			{
+				return -40000 * teamMul;
+			}
+			return 40000 * teamMul;
+		}
+		if (_board.IsInCheckmate())
+		{
+			//If black's turn is now, we receive 1 in teamMul
+			//And since checkmate is really bad for black,
+			//we use positive value to return really a good scenario to white
+			return 40000 * teamMul;
 		}
 
 		if (depth == 0)
@@ -234,32 +247,9 @@ public class MyBot : IChessBot
 					selfPieceWeights[(int)thisType]);
 				finalValue -= (_board.GetPieceList(thisType, false).Count * 
 					(selfPieceWeights[(int)thisType]));
-				//finalValue -= _board.GetPieceList(thisType, !whiteToMove).Count
-				//	* (selfPieceWeights[(int)thisType] - enemyPieceWeightModifier);
 			}
 			return finalValue * teamMul;
-
-			/*
-			ulong bitboardToUse = _board.BlackPiecesBitboard;
-			if(isWhiteTeam)
-			{
-				bitboardToUse = _board.WhitePiecesBitboard;
-			}
-			int numOfPieces = 0;
-			//Check each bit for a possible piece
-			for(int i = 0; i < 64; i++)
-			{
-				if((bitboardToUse & (ulong)(1 << i)) == 1)
-				{
-					numOfPieces++;
-				}
-			}
-			
-			return numOfPieces;
-			*/
 		}
-
-		
 
 		//Get the new moves for the next turn
 		var nextMoves = GetLegalMoves();
@@ -288,21 +278,8 @@ public class MyBot : IChessBot
 			alpha = Math.Min(thisVal, alpha);
 			if(alpha <= beta)
 			{
-				//Console.WriteLine("asdasd" + alpha);
 				break;
 			}
-			/*
-			if(thisTeamTurn)
-			{
-				//Console.WriteLine("T: " + thisVal + " | B: " + bestValue);
-				bestValue = Math.Min(thisVal, bestValue);
-			}
-			else
-			{
-				//Console.WriteLine("ET: " + thisVal + " | B: " + bestValue);
-				bestValue = Math.Max(thisVal, bestValue);
-			}
-			*/
 		}
 
 		return bestValue;
